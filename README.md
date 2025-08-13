@@ -3,7 +3,7 @@
 </h1>
 
 <p align="center">
-  <b>Developer:</b> <a href="https://t.me/Ankitgupta124">🖤 Devil [@Ankitgupta124]</a>
+  <b>Developer:</b> <a href="https://t.me/Ankitgupta214">🖤 Devil [@Ankitgupta124]</a>
 </p>
 
 ---
