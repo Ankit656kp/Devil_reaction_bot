@@ -567,3 +567,138 @@ async def auto_react_for_channel_posts(update: Update, context: ContextTypes.DEF
         )
     except Exception:
         pass
+
+# =============== CHAT MEMBER UPDATES ===============
+async def my_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    upd: ChatMemberUpdated = update.my_chat_member
+    if not upd:
+        return
+    chat = upd.chat
+    new_status = upd.new_chat_member.status
+    if new_status in ("administrator", "member"):
+        await upsert_chat(chat)
+    elif new_status in ("left", "kicked"):
+        await mark_left(chat.id)
+
+async def chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return
+
+# =============== INLINE MENU CALLBACKS ===============
+async def menu_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    data = q.data or ""
+    uid = q.from_user.id
+
+    async def ensure_auth(need_owner=False, need_admin=False):
+        if need_owner and not is_owner(uid):
+            await q.answer("Owner only.", show_alert=True)
+            return False
+        if need_admin and not (is_owner(uid) or await is_admin(uid)):
+            await q.answer("Admins only.", show_alert=True)
+            return False
+        return True
+
+    if data.startswith("menu:list:"):
+        if not await ensure_auth(need_owner=True): return
+        page = int(data.split(":")[-1])
+        await q.answer()
+        await send_chat_page(q.message.chat_id, context, max(1, page)); return
+
+    if data == "menu:stats":
+        if not await ensure_auth(need_admin=True): return
+        await q.answer()
+        fake_update = Update(update.update_id, message=q.message)
+        await stats(fake_update, context); return
+
+    if data == "menu:ping":
+        if not await ensure_auth(need_admin=True): return
+        await q.answer()
+        fake_update = Update(update.update_id, message=q.message)
+        await ping(fake_update, context); return
+
+    if data == "menu:broadcast_prompt":
+        if not await ensure_auth(need_admin=True): return
+        await q.edit_message_text(
+            "📣 *Broadcast*\nReply to any message with `/broadcast` OR send `/broadcast Your text here`",
+            parse_mode=ParseMode.MARKDOWN
+        ); return
+
+    if data == "menu:block_help":
+        if not await ensure_auth(need_owner=True): return
+        await q.edit_message_text("Block/Unblock:\n`/block <chat_id>`\n`/unblock <chat_id>`", parse_mode=ParseMode.MARKDOWN); return
+
+    if data == "menu:addadmin_help":
+        if not await ensure_auth(need_owner=True): return
+        await q.edit_message_text("Admins:\n`/addadmin <user_id>`\n`/deladmin <user_id>`\n`/admins`", parse_mode=ParseMode.MARKDOWN); return
+
+    if data == "menu:leave_help":
+        if not await ensure_auth(need_owner=True): return
+        await q.edit_message_text("Leave chat:\n`/leave <chat_id>`", parse_mode=ParseMode.MARKDOWN); return
+
+    if data == "menu:setreaction_help":
+        if not await ensure_auth(need_owner=True): return
+        emojis = await get_reaction_emojis()
+        await q.edit_message_text(f"Add/Delete reactions with:\n`/addreaction <emoji>`\n`/delreaction <emoji>`\nCurrent: {' '.join(emojis)}", parse_mode=ParseMode.MARKDOWN); return
+
+    await q.answer()
+
+# =============== MISC ===============
+async def save_on_new_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat = update.effective_chat
+    if chat:
+        await upsert_chat(chat)
+
+# =============== MAIN ===============
+def main():
+    if BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
+        raise RuntimeError("Please set BOT_TOKEN (env or constant).")
+
+    app = Application.builder()\
+        .token(BOT_TOKEN)\
+        .rate_limiter(AIORateLimiter())\
+        .build()
+
+    # Commands
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("ping", ping))
+    app.add_handler(CommandHandler("addadmin", add_admin))
+    app.add_handler(CommandHandler("deladmin", del_admin))
+    app.add_handler(CommandHandler("admins", list_admins))
+    app.add_handler(CommandHandler("stats", stats))
+    app.add_handler(CommandHandler("list", list_chats))
+    app.add_handler(CommandHandler("block", block_cmd))
+    app.add_handler(CommandHandler("unblock", unblock_cmd))
+    app.add_handler(CommandHandler("leave", leave_cmd))
+    app.add_handler(CommandHandler("broadcast", broadcast_cmd))
+    app.add_handler(CommandHandler("reactions", list_reactions_cmd))
+    app.add_handler(CommandHandler("addreaction", addreaction_cmd))
+    app.add_handler(CommandHandler("delreaction", delreaction_cmd))
+
+    # Auto-reaction handlers
+    app.add_handler(MessageHandler(filters.ChatType.GROUPS, auto_react_for_group_mentions))
+    app.add_handler(MessageHandler(filters.ChatType.CHANNEL, auto_react_for_channel_posts))
+
+    # Track add/remove
+    app.add_handler(ChatMemberHandler(my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER))
+    app.add_handler(ChatMemberHandler(chat_member, ChatMemberHandler.CHAT_MEMBER))
+
+    # Menu callbacks
+    app.add_handler(CallbackQueryHandler(menu_cb, pattern="^menu:"))
+    app.add_handler(CallbackQueryHandler(help_menu_cb, pattern="^menu:help_"))
+    app.add_handler(CallbackQueryHandler(lambda u,c: u.callback_query.answer(), pattern="^noop$"))
+
+    # Track chats on any message bot can see
+    app.add_handler(MessageHandler(filters.ALL, save_on_new_message))
+
+    # Polling
+    app.run_polling(
+        close_loop=False,
+        allowed_updates=[
+            "message", "channel_post", "my_chat_member", "chat_member",
+            "message_reaction", "message_reaction_count"
+        ]
+    )
+
+if __name__ == "__main__":
+    main()
